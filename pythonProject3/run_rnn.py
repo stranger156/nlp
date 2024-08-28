@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader, TensorDataset
 import pandas as pd
 import torch.nn as nn
 
-from CNN_model import get_embedding_matrix
+from RNN_module import get_embedding_matrix, RNNconfig, RNNmodel, get_vocab, LabelSmoothingCrossEntropy
 
 
 def weights_init(m):
@@ -15,14 +15,10 @@ def weights_init(m):
             nn.init.zeros_(m.bias)
 
 
-def get_vocab():
-    pass
-
-
 vocab = get_vocab()
 vocab_size = len(vocab)
 
-matrix = get_embedding_matrix('word2vec', vocab)
+matrix = get_embedding_matrix('glove', vocab)
 print(matrix)
 embedding_matrix = torch.Tensor(matrix)
 
@@ -148,10 +144,16 @@ def predict(model, test_loader):
     data['PhraseId'] = test_ids
     data['Sentiment'] = predictions
     df = pd.DataFrame(data)
-    df.to_csv('predict_result.csv', index=False)
+    df.to_csv('predict_result_glove_batch128.csv', index=False)
     return
 
 
 # 训练模型
-train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs=50)
-torch.save(model.state_dict(), 'rnn_model.pth')
+train_model(model, train_loader, val_loader, criterion, optimizer, num_epochs=20)
+torch.save(model.state_dict(), 'rnn_model_glove_batch128.pth')
+
+# 加载保存的模型状态字典
+model = RNNmodel(config)  # 重新实例化模型
+model.load_state_dict(torch.load("rnn_model_glove_batch128.pth"))
+model.to(device)
+predict(model, test_loader)

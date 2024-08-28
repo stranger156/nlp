@@ -1,22 +1,28 @@
 import torch
 import torch.nn as nn
 import numpy as np
+import gensim
 import gensim.downloader as api
-#   导入词汇表
-vocab_path = 'data/vocab.txt'
-vocab = {}
 
-with open(vocab_path, 'r', encoding='utf-8') as f:
-    for line in f:
-        index, word = line.strip().split('\t')
-        vocab[int(index)] = word
-vocab_size = len(vocab)
-print(vocab)
+
+#   导入词汇表
+def get_vocab():
+    vocab_path = 'data/vocab.txt'
+    vocab = {}
+
+    with open(vocab_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            index, word = line.strip().split('\t')
+            vocab[int(index)] = word
+    vocab_size = len(vocab)
+    print(vocab)
+    return vocab
 
 
 def get_embedding_matrix(category, vocab):
     find_word = 0
     embedding_dim = 300
+    vocab_size = len(vocab)
     embedding_matrix = np.zeros((vocab_size, embedding_dim))
     if category == 'word2vec':
         word2vec_module = api.load("word2vec-google-news-300")
@@ -42,13 +48,8 @@ def get_embedding_matrix(category, vocab):
     return embedding_matrix
 
 
-matrix = get_embedding_matrix('word2vec', vocab)
-print(matrix)
-embedding_matrix = torch.Tensor(matrix)
-
-
 class RNNconfig:
-    def __init__(self):
+    def __init__(self, vocab_size):
         self.embedding_dim = 300  # 嵌入层维度，因为使用了预训练模型选用的300
         self.hidden_dim = 256  # 隐藏层维度，可以从256开始调整
         self.output_dim = 5  # 输出维度，五个类别所以是5
@@ -61,9 +62,11 @@ class RNNconfig:
         self.eos_idx = 3  # <EOS>索引
         self.unk_idx = 1  # <UNK>索引
 
+
 class RNNmodel(nn.Module):
     def __init__(self, config: RNNconfig, embedding_matrix: torch.Tensor = None):
         super(RNNmodel, self).__init__()
+        self.config = config
 
         #  定义嵌入层，如果有嵌入矩阵则使用预训练的嵌入矩阵
         if embedding_matrix is None:
@@ -100,7 +103,7 @@ class RNNmodel(nn.Module):
         output, (hidden, cell) = self.rnn(embedded)
 
         # 如果使用双向RNN，需要将前向和后向的hidden state拼接起来
-        if config.bidirectional:
+        if self.config.bidirectional:
             hidden = torch.cat((hidden[-2, :, :], hidden[-1, :, :]), dim=1)
         else:
             hidden = hidden[-1, :, :]
@@ -116,30 +119,18 @@ class RNNmodel(nn.Module):
         return probabilities
 
 
-# 使用示例
-config = RNNconfig()
+class LabelSmoothingCrossEntropy(nn.Module):
+    def __init__(self, smoothing=0.1):
+        super(LabelSmoothingCrossEntropy, self).__init__()
+        self.smoothing = smoothing
 
-# 创建一个模型实例
-model = RNNmodel(config, embedding_matrix=embedding_matrix)
-
-# 模拟一个batch的输入数据
-# 假设我们有一个batch_size=4，每个句子长度为10
-batch_size = 4
-sent_len = 10
-
-# 随机生成一个输入张量
-input_tensor = torch.randint(0, config.vocab_size, (batch_size, sent_len))
-
-# 前向传播测试
-output = model(input_tensor)
-
-# 检查输出的维度是否正确
-assert output.shape == (batch_size, config.output_dim), \
-    f"期望得到的维度 {(batch_size, config.output_dim)}, 但是得到了 {output.shape}"
-
-print(output)
-print("模型测试通过")
-
+    def forward(self, inputs, targets):
+        n_classes = inputs.size(1)
+        smooth_targets = torch.full_like(inputs, self.smoothing / (n_classes - 1))
+        smooth_targets.scatter_(1, targets.unsqueeze(1), 1.0 - self.smoothing)
+        log_probs = torch.log_softmax(inputs, dim=1)
+        loss = -(smooth_targets * log_probs).sum(dim=1).mean()
+        return loss
 
 
 
